@@ -18,8 +18,7 @@ def autenticar_usuario(email, senha):
 def autenticar_visitante(codigo):
     return visitantes_collection.find_one({"codigo_acesso": codigo})
 
-# --- Pedido simples em memoria por exemplo ---
-pedidos = {}  # {usuario_id: [pedido1, pedido2]}
+pedidos = {}
 
 def salvar_pedido(usuario_id, pedido):
     if usuario_id in pedidos:
