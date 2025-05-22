@@ -5,12 +5,14 @@ from bson import ObjectId
 import bcrypt
 import os
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 # Carregar variáveis de ambiente do .env
 load_dotenv()
 
 # Inicializar app
 app = Flask(__name__)
+CORS(app)
 
 # Conectar ao MongoDB
 mongodb_url = os.getenv("MONGODB_URL")
@@ -25,7 +27,7 @@ def usuario_to_json(usuario):
     return usuario
 
 # Rota de criação de usuário
-@app.route("/usuarios", methods=["POST"])
+@app.route("/usuarios/cadastro", methods=["POST"])
 def cadastrar_usuario():
     dados = request.get_json()
     email = dados.get("email")
