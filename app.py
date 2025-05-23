@@ -6,9 +6,13 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 from flask_cors import CORS
+from chat import chat
 
 # Carregar variáveis de ambiente do .env
 load_dotenv()
+
+print("OPENAI_API_KEY:", os.getenv("OPENAI_API_KEY"))
+
 
 # Inicializar app
 app = Flask(__name__)
@@ -119,6 +123,33 @@ def deletar_usuario(id):
     if resultado.deleted_count == 0:
         return jsonify({"erro": "Usuário não encontrado"}), 404
     return jsonify({"mensagem": "Usuário deletado com sucesso"}), 200
+
+@app.route("/chat", methods=["POST"])
+def chat_route():
+    dados = request.get_json()
+    usuario_id = dados.get("usuario_id")
+    mensagem = dados.get("mensagem")
+
+    if not usuario_id or not mensagem:
+        return jsonify({"erro": "Usuário e mensagem obrigatórios"}), 400
+
+    resposta = chat(usuario_id, mensagem)
+    return jsonify({"resposta": resposta})
+
+@app.route("/chat", methods=["POST"])
+def chat_endpoint():
+    dados = request.get_json()
+    usuario_id = dados.get("usuario_id")
+    mensagem = dados.get("mensagem")
+
+    # Aqui você chama sua função chat(usuario_id, mensagem) que retorna texto
+    resposta = chat(usuario_id, mensagem)
+
+    return jsonify({"resposta": resposta})
+
+    from chat import chat
+
+
 
 # Iniciar servidor
 if __name__ == "__main__":
