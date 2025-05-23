@@ -1,3 +1,4 @@
+from chat import chat
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
@@ -6,6 +7,7 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 from flask_cors import CORS
+from datetime import datetime
 
 # Carregar variáveis de ambiente do .env
 load_dotenv()
@@ -119,6 +121,26 @@ def deletar_usuario(id):
     if resultado.deleted_count == 0:
         return jsonify({"erro": "Usuário não encontrado"}), 404
     return jsonify({"mensagem": "Usuário deletado com sucesso"}), 200
+
+# Rota do Chatbot
+@app.route("/chat", methods=["POST"])
+def chat_route():
+    dados = request.get_json()
+    usuario_id = dados.get("usuario_id")
+    mensagem = dados.get("mensagem")
+
+    if not usuario_id or not mensagem:
+        return jsonify({"erro": "Campos 'usuario_id' e 'mensagem' são obrigatórios"}), 400
+
+    resposta = chat(usuario_id, mensagem)
+
+    # Salva a mensagem do usuário e a resposta do bot no banco
+    database["mensagens"].insert_many([
+        {"usuario_id": usuario_id, "mensagem": mensagem, "origem": "usuario", "data": datetime.utcnow()},
+        {"usuario_id": usuario_id, "mensagem": resposta, "origem": "bot", "data": datetime.utcnow()}
+    ])
+
+    return jsonify({"resposta": resposta}), 200
 
 # Iniciar servidor
 if __name__ == "__main__":

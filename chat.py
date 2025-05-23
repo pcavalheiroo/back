@@ -1,11 +1,15 @@
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from models import listar_cardapio, buscar_item_cardapio, salvar_pedido, obter_pedidos
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.4,
-    openai_api_key="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",
+    openai_api_key=os.getenv("OPENROUTER_API_KEY"),
     openai_api_base="https://openrouter.ai/api/v1"
 )
 
@@ -34,3 +38,5 @@ def chat(usuario_id, mensagem):
         messages = [system_message, HumanMessage(content=mensagem)]
         resposta = llm.invoke(messages).content
         return resposta
+    
+print(chat("12345", "oi tudo bem"))
