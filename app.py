@@ -68,18 +68,27 @@ def login():
 
     senha_hash = usuario.get("senha")
 
-    # Caso a senha esteja armazenada como string, converte para bytes
     if isinstance(senha_hash, str):
         senha_hash = senha_hash.encode("utf-8")
 
     if bcrypt.checkpw(senha.encode("utf-8"), senha_hash):
-        return jsonify({"mensagem": "Login bem-sucedido"}), 200
+        # Retorna todos os dados do usuário (exceto senha)
+        usuario.pop("senha", None)
+        usuario["_id"] = str(usuario["_id"])
+        return jsonify(usuario), 200
     else:
         return jsonify({"erro": "Senha incorreta"}), 401
 
-# Listar todos os usuários
+# Listar todos os usuários ou buscar por email
 @app.route("/usuarios", methods=["GET"])
 def listar_usuarios():
+    email = request.args.get("email")
+    if email:
+        usuario = usuarios.find_one({"email": email})
+        if usuario:
+            return jsonify([usuario_to_json(usuario)]), 200
+        return jsonify({"erro": "Usuário não encontrado"}), 404
+    
     todos = list(usuarios.find())
     return jsonify([usuario_to_json(u) for u in todos]), 200
 
@@ -122,7 +131,10 @@ def deletar_usuario(id):
         return jsonify({"erro": "Usuário não encontrado"}), 404
     return jsonify({"mensagem": "Usuário deletado com sucesso"}), 200
 
-# Rota do Chatbot
+
+
+
+# Rotas do Chatbot
 @app.route("/chat", methods=["POST"])
 def chat_route():
     dados = request.get_json()
@@ -141,6 +153,25 @@ def chat_route():
     ])
 
     return jsonify({"resposta": resposta}), 200
+
+@app.route("/chat/historico", methods=["GET"])
+def historico_mensagens():
+    usuario_id = request.args.get("usuario_id")
+    if not usuario_id:
+        return jsonify({"erro": "ID do usuário é obrigatório"}), 400
+    
+    # Busca as mensagens em ordem cronológica (mais antigas primeiro)
+    historico = list(database["mensagens"].find(
+        {"usuario_id": usuario_id},
+        sort=[("data", pymongo.ASCENDING)]  # Ordem crescente (mais antigo primeiro)
+    ))
+    
+    return jsonify([{
+        "_id": str(msg["_id"]),
+        "mensagem": msg["mensagem"],
+        "origem": msg["origem"],
+        "data": msg["data"].isoformat()
+    } for msg in historico]), 200
 
 # Iniciar servidor
 if __name__ == "__main__":
