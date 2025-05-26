@@ -143,7 +143,8 @@ class ChatService:
         padroes = [
             "quero pedir", "fazer um pedido", "quero isso", "gostaria de", 
             "me vê", "pode ser", "pedido", "quero", "pedir", "adicionar ao pedido",
-            "colocar no pedido", "escolher", "vou querer", "me traga"
+            "colocar no pedido", "escolher", "vou querer", "me traga", "quero fazer um pedido",
+            "pdiddy"
         ]
         return self._mensagem_similar(mensagem, padroes, limiar=70)
 
