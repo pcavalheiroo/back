@@ -1,5 +1,3 @@
-# app.py
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from db.connection import database
@@ -8,6 +6,7 @@ import os
 from dotenv import load_dotenv
 from services.chat_service import chat_service
 import bcrypt
+import re
 
 load_dotenv()
 
@@ -15,6 +14,25 @@ app = Flask(__name__)
 CORS(app)
 
 # --- Rotas Usuários ---
+
+def validar_email(email):
+    # Expressão regular para um formato de e-mail básico
+    # Esta regex é mais robusta para verificar o formato geral de e-mail.
+    # No entanto, a validação de domínio é feita separadamente.
+    email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    
+    # Domínios permitidos
+    dominios_permitidos = ["@p4ed.com", "@sistemapoliedro.com.br"]
+
+    if not re.match(email_regex, email):
+        return False, "Formato de e-mail inválido."
+
+    # Verifica se o e-mail termina com um dos domínios permitidos
+    for dominio in dominios_permitidos:
+        if email.endswith(dominio):
+            return True, None
+            
+    return False, "E-mail não pertence a um domínio permitido."
 
 @app.route("/usuarios/login", methods=["POST"])
 def login():
@@ -29,14 +47,22 @@ def login():
         if not email or not senha:
             return jsonify({"erro": "Email e senha são obrigatórios"}), 400
 
+        # Validação do e-mail
+        is_valido, mensagem_erro = validar_email(email)
+        if not is_valido:
+            # Não é ideal retornar "Usuário não encontrado" ou "Senha incorreta" para e-mails inválidos.
+            # Uma mensagem mais genérica como "Credenciais inválidas" é melhor por segurança.
+            return jsonify({"erro": "Credenciais inválidas"}), 401 
+
+
         usuario = database.usuarios.find_one({"email": email})
         if not usuario:
-            return jsonify({"erro": "Usuário não encontrado"}), 404
+            return jsonify({"erro": "Credenciais inválidas"}), 401 # Mensagem genérica por segurança
 
         senha_hash = usuario.get("senha")
 
         if senha_hash is None:
-            return jsonify({"erro": "Senha não cadastrada para usuário"}), 500
+            return jsonify({"erro": "Erro de configuração do usuário"}), 500 # Melhor mensagem para este caso
 
         # senha_hash pode estar como bytes ou string
         if isinstance(senha_hash, bytes):
@@ -49,7 +75,7 @@ def login():
             usuario.pop("senha", None)
             return jsonify(usuario), 200
 
-        return jsonify({"erro": "Senha incorreta"}), 401
+        return jsonify({"erro": "Credenciais inválidas"}), 401 # Mensagem genérica por segurança
 
     except Exception as e:
         print(f"Erro no login: {str(e)}")
@@ -93,6 +119,8 @@ def enviar_mensagem():
         dados = request.get_json()
         usuario_id = dados.get("usuario_id")
         mensagem = dados.get("mensagem")
+
+        print(f"DEBUG: Mensagem recebida para usuario_id: {usuario_id}") # Adicione esta linha
 
         if not usuario_id or not mensagem:
             return jsonify({"erro": "Dados incompletos"}), 400
@@ -147,21 +175,23 @@ def enviar_mensagem():
 def historico_mensagens():
     try:
         usuario_id = request.args.get("usuario_id")
+        print(f"DEBUG: Requisitando histórico para usuario_id: {usuario_id}")
         if not usuario_id:
             return jsonify({"erro": "ID do usuário é obrigatório"}), 400
 
         historico = list(database.mensagens.find(
             {"usuario_id": usuario_id},
-            sort=[("data", 1)],
+            sort=[("data", 1)], # Manter a ordenação por 'data' ou 'timestamp' se preferir, mas 'data' é o padrão atual
             limit=100
         ))
+        print(f"DEBUG: Histórico de mensagens encontrado para {usuario_id}: {historico}")
 
         return jsonify([
             {
                 "_id": str(msg["_id"]),
                 "mensagem": msg["mensagem"],
-                "origem": msg["origem"],
-                "data": msg["data"].isoformat()
+                "origem": msg.get("origem") or msg.get("remetente"),
+                "data": (msg.get("data") or msg.get("timestamp")).isoformat() # <--- CORREÇÃO AQUI
             } for msg in historico
         ]), 200
 
