@@ -1,3 +1,5 @@
+# app.py
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from db.connection import database
@@ -99,7 +101,25 @@ def enviar_mensagem():
             database.create_collection('mensagens')
             print("Coleção 'mensagens' criada")
 
-        resposta = chat_service.processar_mensagem(usuario_id, mensagem)
+        # 1. Obter o pedido em aberto para o usuário específico
+        pedido_em_aberto_usuario = database.pedidos_em_aberto.find_one({"usuario_id": usuario_id})
+
+        # 2. Obter todos os pedidos finalizados para o histórico
+        todos_os_pedidos_finalizados = list(database.pedidos.find({"usuario_id": usuario_id}))
+
+        # 3. Obter o cardápio disponível
+        cardapio_disponivel = list(database.cardapio.find({"disponibilidade": True}))
+
+        # 4. Passar todos os dados necessários para o chat_service.processar_mensagem
+        resposta = chat_service.processar_mensagem(
+            usuario_id, 
+            mensagem, 
+            pedido_em_aberto_usuario,
+            todos_os_pedidos_finalizados,
+            cardapio_disponivel,
+            database.pedidos_em_aberto, # Coleção de pedidos em aberto
+            database.pedidos          # Coleção de pedidos finalizados
+        )
 
         result_usuario = database.mensagens.insert_one({
             "usuario_id": usuario_id,
@@ -183,7 +203,7 @@ def get_cardapio():
         if not itens:
             return jsonify({"aviso": "Cardápio vazio"}), 200
 
-        print(f"Retornando {len(itens)} itens do cardápio")
+        print(f"Retornando {len(itens)} itens do cardapio")
         return jsonify(itens), 200
 
     except Exception as e:
