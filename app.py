@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from db.connection import database
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 from services.chat_service import chat_service
 import bcrypt
 import re
+from bson.objectid import ObjectId
 
 load_dotenv()
 
@@ -120,7 +122,7 @@ def enviar_mensagem():
         usuario_id = dados.get("usuario_id")
         mensagem = dados.get("mensagem")
 
-        print(f"DEBUG: Mensagem recebida para usuario_id: {usuario_id}") # Adicione esta linha
+        print(f"DEBUG: Mensagem recebida para usuario_id: {usuario_id}")
 
         if not usuario_id or not mensagem:
             return jsonify({"erro": "Dados incompletos"}), 400
@@ -146,7 +148,7 @@ def enviar_mensagem():
             todos_os_pedidos_finalizados,
             cardapio_disponivel,
             database.pedidos_em_aberto, # Coleção de pedidos em aberto
-            database.pedidos          # Coleção de pedidos finalizados
+            database.pedidos            # Coleção de pedidos finalizados
         )
 
         result_usuario = database.mensagens.insert_one({
@@ -181,7 +183,7 @@ def historico_mensagens():
 
         historico = list(database.mensagens.find(
             {"usuario_id": usuario_id},
-            sort=[("data", 1)], # Manter a ordenação por 'data' ou 'timestamp' se preferir, mas 'data' é o padrão atual
+            sort=[("data", 1)],
             limit=100
         ))
         print(f"DEBUG: Histórico de mensagens encontrado para {usuario_id}: {historico}")
@@ -191,7 +193,7 @@ def historico_mensagens():
                 "_id": str(msg["_id"]),
                 "mensagem": msg["mensagem"],
                 "origem": msg.get("origem") or msg.get("remetente"),
-                "data": (msg.get("data") or msg.get("timestamp")).isoformat() # <--- CORREÇÃO AQUI
+                "data": (msg.get("data") or msg.get("timestamp")).isoformat()
             } for msg in historico
         ]), 200
 
@@ -223,15 +225,20 @@ def limpar_historico():
 def get_cardapio():
     try:
         if 'cardapio' not in database.list_collection_names():
-            return jsonify({"erro": "Cardápio não disponível"}), 404
+            return jsonify({"erro": "Coleção 'cardapio' não encontrada no banco de dados."}), 500
 
         itens = list(database.cardapio.find(
             {"disponibilidade": True},
-            {"_id": 0}
+            # Inclua todos os campos necessários e o _id!
+            {"_id": 1, "nome": 1, "preco": 1, "categoria": 1, "descricao": 1, "disponibilidade": 1} 
         ).sort([("categoria", 1), ("nome", 1)]))
 
+        # É ABSOLUTAMENTE ESSENCIAL converter o ObjectId para string
+        for item in itens:
+            item['_id'] = str(item['_id'])
+
         if not itens:
-            return jsonify({"aviso": "Cardápio vazio"}), 200
+            return jsonify({"aviso": "Cardápio vazio ou sem itens disponíveis."}), 200
 
         print(f"Retornando {len(itens)} itens do cardapio")
         return jsonify(itens), 200
@@ -239,6 +246,73 @@ def get_cardapio():
     except Exception as e:
         print(f"ERRO no cardápio: {str(e)}")
         return jsonify({"erro": "Erro interno ao buscar cardápio"}), 500
+    
+@app.route('/pedidos/historico', methods=['GET'])
+def get_historico_pedidos():
+    try:
+        usuario_id = request.args.get('usuario_id')
+        if not usuario_id:
+            return jsonify({"erro": "ID do usuário é obrigatório"}), 400
+
+        cardapio_map = {item['nome']: item for item in database.cardapio.find({"disponibilidade": True})}
+
+        pedidos_cursor = database.pedidos.find(
+            {"usuario_id": usuario_id}
+        ).sort("data", -1)
+
+        pedidos_formatados = []
+        for pedido in pedidos_cursor:
+            pedido['_id'] = str(pedido['_id'])
+            
+            if 'data' in pedido and isinstance(pedido['data'], datetime):
+                pedido['data_pedido'] = pedido['data'].isoformat()
+            else:
+                pedido['data_pedido'] = datetime.utcnow().isoformat()
+
+            total_pedido_calculado = 0
+            itens_processados = []
+
+            for item_pedido_original in pedido.get('itens', []):
+                # --- ADIÇÃO DE VERIFICAÇÃO DE TIPO AQUI ---
+                if not isinstance(item_pedido_original, dict):
+                    print(f"AVISO: Item de pedido mal formatado encontrado (não é um dicionário): '{item_pedido_original}' no pedido ID: {pedido['_id']}. Pulando este item.")
+                    continue  # Pula este item e vai para o próximo
+                # --- FIM DA ADIÇÃO ---
+
+                nome_item = item_pedido_original.get('nome') 
+                quantidade_item = item_pedido_original.get('quantidade', 1) 
+
+                preco_item = 0.00
+                
+                # Sua lógica de busca de preço no cardápio é boa
+                if nome_item in cardapio_map:
+                    preco_item = cardapio_map[nome_item].get('preco', 0.00)
+                else:
+                    # Se o item do pedido não está no cardápio, pega o preço direto do item se existir
+                    preco_item = item_pedido_original.get('preco', 0.00)
+
+                itens_processados.append({
+                    "_id": str(item_pedido_original.get('_id', ObjectId())),
+                    "nome": nome_item,
+                    "preco": preco_item,
+                    "quantidade": quantidade_item
+                })
+                total_pedido_calculado += (preco_item * quantidade_item)
+
+            pedido['total'] = total_pedido_calculado
+            pedido['itens'] = itens_processados
+            
+            pedidos_formatados.append(pedido)
+
+        if not pedidos_formatados:
+            return jsonify({"aviso": "Nenhum pedido encontrado para este usuário."}), 200
+
+        print(f"DEBUG: Retornando {len(pedidos_formatados)} pedidos formatados para o usuário {usuario_id}")
+        return jsonify(pedidos_formatados), 200
+
+    except Exception as e:
+        print(f"ERRO ao buscar histórico de pedidos: {str(e)}")
+        return jsonify({"erro": "Erro interno ao buscar histórico de pedidos"}), 500
 
 # --- Inicialização ---
 
