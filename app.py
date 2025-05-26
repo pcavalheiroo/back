@@ -1,178 +1,196 @@
-from chat import chat
-from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, request, jsonify
-from pymongo import MongoClient
-from bson import ObjectId
-import bcrypt
+from flask_cors import CORS
+from db.connection import database
+from datetime import datetime
 import os
 from dotenv import load_dotenv
-from flask_cors import CORS
-from datetime import datetime
+from services.chat_service import chat_service
+import bcrypt
 
-# Carregar variáveis de ambiente do .env
 load_dotenv()
 
-# Inicializar app
 app = Flask(__name__)
 CORS(app)
 
-# Conectar ao MongoDB
-mongodb_url = os.getenv("MONGODB_URL")
-client = MongoClient(mongodb_url)
-database = client["polichat"]
-usuarios = database["usuarios"]
+# --- Rotas Usuários ---
 
-# Função para remover senha do JSON
-def usuario_to_json(usuario):
-    usuario["_id"] = str(usuario["_id"])
-    usuario.pop("senha", None)
-    return usuario
-
-# Rota de criação de usuário
-@app.route("/usuarios/cadastro", methods=["POST"])
-def cadastrar_usuario():
-    dados = request.get_json()
-    email = dados.get("email")
-    senha = dados.get("senha")
-
-    if not email or not senha:
-        return jsonify({"erro": "Email e senha obrigatórios"}), 400
-
-    # Verifica se o usuário já existe
-    if usuarios.find_one({"email": email}):
-        return jsonify({"erro": "Usuário já existe"}), 409
-
-    # Criptografa a senha e converte para string
-    senha_hash = bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-    usuarios.insert_one({
-        "email": email,
-        "senha": senha_hash
-    })
-
-    return jsonify({"mensagem": "Usuário cadastrado com sucesso"}), 201
-
-# Rota de login
 @app.route("/usuarios/login", methods=["POST"])
 def login():
-    dados = request.get_json()
-    email = dados.get("email")
-    senha = dados.get("senha")
+    try:
+        dados = request.get_json()
+        if not dados:
+            return jsonify({"erro": "Dados não fornecidos"}), 400
 
-    if not email or not senha:
-        return jsonify({"erro": "Email e senha obrigatórios"}), 400
+        email = dados.get("email")
+        senha = dados.get("senha")
 
-    usuario = usuarios.find_one({"email": email})
-    if not usuario:
-        return jsonify({"erro": "Usuário não encontrado"}), 404
+        if not email or not senha:
+            return jsonify({"erro": "Email e senha são obrigatórios"}), 400
 
-    senha_hash = usuario.get("senha")
+        usuario = database.usuarios.find_one({"email": email})
+        if not usuario:
+            return jsonify({"erro": "Usuário não encontrado"}), 404
 
-    if isinstance(senha_hash, str):
-        senha_hash = senha_hash.encode("utf-8")
+        senha_hash = usuario.get("senha")
 
-    if bcrypt.checkpw(senha.encode("utf-8"), senha_hash):
-        # Retorna todos os dados do usuário (exceto senha)
-        usuario.pop("senha", None)
-        usuario["_id"] = str(usuario["_id"])
-        return jsonify(usuario), 200
-    else:
+        if senha_hash is None:
+            return jsonify({"erro": "Senha não cadastrada para usuário"}), 500
+
+        # senha_hash pode estar como bytes ou string
+        if isinstance(senha_hash, bytes):
+            valido = bcrypt.checkpw(senha.encode('utf-8'), senha_hash)
+        else:
+            valido = bcrypt.checkpw(senha.encode('utf-8'), senha_hash.encode('utf-8'))
+
+        if valido:
+            usuario["_id"] = str(usuario["_id"])
+            usuario.pop("senha", None)
+            return jsonify(usuario), 200
+
         return jsonify({"erro": "Senha incorreta"}), 401
 
-# Listar todos os usuários ou buscar por email
-@app.route("/usuarios", methods=["GET"])
-def listar_usuarios():
-    email = request.args.get("email")
-    if email:
-        usuario = usuarios.find_one({"email": email})
-        if usuario:
-            return jsonify([usuario_to_json(usuario)]), 200
-        return jsonify({"erro": "Usuário não encontrado"}), 404
-    
-    todos = list(usuarios.find())
-    return jsonify([usuario_to_json(u) for u in todos]), 200
+    except Exception as e:
+        print(f"Erro no login: {str(e)}")
+        return jsonify({"erro": "Erro interno no servidor"}), 500
 
-# Buscar usuário por ID
-@app.route("/usuarios/<id>", methods=["GET"])
-def buscar_usuario(id):
+@app.route("/usuarios/cadastro", methods=["POST"])
+def cadastrar_usuario():
     try:
-        usuario = usuarios.find_one({"_id": ObjectId(id)})
-        if usuario:
-            return jsonify(usuario_to_json(usuario)), 200
-        return jsonify({"erro": "Usuário não encontrado"}), 404
-    except:
-        return jsonify({"erro": "ID inválido"}), 400
+        dados = request.get_json()
+        if not dados:
+            return jsonify({"erro": "Dados não fornecidos"}), 400
 
-# Atualizar tipo do usuário
-@app.route("/usuarios/<id>", methods=["PUT"])
-def atualizar_usuario(id):
-    dados = request.get_json()
-    tipo = dados.get("tipo")
+        email = dados.get("email")
+        senha = dados.get("senha")
 
-    if not tipo:
-        return jsonify({"erro": "Campo 'tipo' obrigatório"}), 400
+        if not email or not senha:
+            return jsonify({"erro": "Email e senha obrigatórios"}), 400
 
-    resultado = usuarios.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {"tipo": tipo}}
-    )
+        if database.usuarios.find_one({"email": email}):
+            return jsonify({"erro": "Usuário já existe"}), 409
 
-    if resultado.matched_count == 0:
-        return jsonify({"erro": "Usuário não encontrado"}), 404
+        senha_hash = bcrypt.hashpw(senha.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-    usuario = usuarios.find_one({"_id": ObjectId(id)})
-    return jsonify(usuario_to_json(usuario)), 200
+        database.usuarios.insert_one({
+            "email": email,
+            "senha": senha_hash,
+            "criado_em": datetime.utcnow()
+        })
 
-# Deletar usuário
-@app.route("/usuarios/<id>", methods=["DELETE"])
-def deletar_usuario(id):
-    resultado = usuarios.delete_one({"_id": ObjectId(id)})
-    if resultado.deleted_count == 0:
-        return jsonify({"erro": "Usuário não encontrado"}), 404
-    return jsonify({"mensagem": "Usuário deletado com sucesso"}), 200
+        return jsonify({"mensagem": "Usuário cadastrado com sucesso"}), 201
 
+    except Exception as e:
+        print(f"Erro no cadastro: {str(e)}")
+        return jsonify({"erro": "Erro interno no servidor"}), 500
 
+# --- Rotas do Chat ---
 
-
-# Rotas do Chatbot
 @app.route("/chat", methods=["POST"])
-def chat_route():
-    dados = request.get_json()
-    usuario_id = dados.get("usuario_id")
-    mensagem = dados.get("mensagem")
+def enviar_mensagem():
+    try:
+        dados = request.get_json()
+        usuario_id = dados.get("usuario_id")
+        mensagem = dados.get("mensagem")
 
-    if not usuario_id or not mensagem:
-        return jsonify({"erro": "Campos 'usuario_id' e 'mensagem' são obrigatórios"}), 400
+        if not usuario_id or not mensagem:
+            return jsonify({"erro": "Dados incompletos"}), 400
 
-    resposta = chat(usuario_id, mensagem)
+        if 'mensagens' not in database.list_collection_names():
+            database.create_collection('mensagens')
+            print("Coleção 'mensagens' criada")
 
-    # Salva a mensagem do usuário e a resposta do bot no banco
-    database["mensagens"].insert_many([
-        {"usuario_id": usuario_id, "mensagem": mensagem, "origem": "usuario", "data": datetime.utcnow()},
-        {"usuario_id": usuario_id, "mensagem": resposta, "origem": "bot", "data": datetime.utcnow()}
-    ])
+        resposta = chat_service.processar_mensagem(usuario_id, mensagem)
 
-    return jsonify({"resposta": resposta}), 200
+        result_usuario = database.mensagens.insert_one({
+            "usuario_id": usuario_id,
+            "mensagem": mensagem,
+            "origem": "usuario",
+            "data": datetime.utcnow()
+        })
+
+        result_bot = database.mensagens.insert_one({
+            "usuario_id": usuario_id,
+            "mensagem": resposta,
+            "origem": "bot",
+            "data": datetime.utcnow()
+        })
+
+        print(f"Mensagens salvas - Usuário: {result_usuario.inserted_id}, Bot: {result_bot.inserted_id}")
+
+        return jsonify({"resposta": resposta}), 200
+
+    except Exception as e:
+        print(f"ERRO GRAVE em /chat: {str(e)}")
+        return jsonify({"erro": "Erro interno no servidor"}), 500
 
 @app.route("/chat/historico", methods=["GET"])
 def historico_mensagens():
-    usuario_id = request.args.get("usuario_id")
-    if not usuario_id:
-        return jsonify({"erro": "ID do usuário é obrigatório"}), 400
-    
-    # Busca as mensagens em ordem cronológica (mais antigas primeiro)
-    historico = list(database["mensagens"].find(
-        {"usuario_id": usuario_id},
-        sort=[("data", pymongo.ASCENDING)]  # Ordem crescente (mais antigo primeiro)
-    ))
-    
-    return jsonify([{
-        "_id": str(msg["_id"]),
-        "mensagem": msg["mensagem"],
-        "origem": msg["origem"],
-        "data": msg["data"].isoformat()
-    } for msg in historico]), 200
+    try:
+        usuario_id = request.args.get("usuario_id")
+        if not usuario_id:
+            return jsonify({"erro": "ID do usuário é obrigatório"}), 400
 
-# Iniciar servidor
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+        historico = list(database.mensagens.find(
+            {"usuario_id": usuario_id},
+            sort=[("data", 1)],
+            limit=100
+        ))
+
+        return jsonify([
+            {
+                "_id": str(msg["_id"]),
+                "mensagem": msg["mensagem"],
+                "origem": msg["origem"],
+                "data": msg["data"].isoformat()
+            } for msg in historico
+        ]), 200
+
+    except Exception as e:
+        print(f"Erro ao buscar histórico: {str(e)}")
+        return jsonify({"erro": "Erro ao carregar histórico"}), 500
+
+@app.route("/chat/limpar_historico", methods=["DELETE"])
+def limpar_historico():
+    try:
+        usuario_id = request.args.get("usuario_id")
+        if not usuario_id:
+            return jsonify({"erro": "ID do usuário é obrigatório"}), 400
+
+        resultado = database.mensagens.delete_many({"usuario_id": usuario_id})
+
+        return jsonify({
+            "mensagem": "Histórico limpo com sucesso",
+            "deletados": resultado.deleted_count
+        }), 200
+
+    except Exception as e:
+        print(f"Erro ao limpar histórico: {str(e)}")
+        return jsonify({"erro": "Falha ao limpar histórico"}), 500
+
+# --- Rota do Cardápio ---
+
+@app.route('/cardapio', methods=['GET'])
+def get_cardapio():
+    try:
+        if 'cardapio' not in database.list_collection_names():
+            return jsonify({"erro": "Cardápio não disponível"}), 404
+
+        itens = list(database.cardapio.find(
+            {"disponibilidade": True},
+            {"_id": 0}
+        ).sort([("categoria", 1), ("nome", 1)]))
+
+        if not itens:
+            return jsonify({"aviso": "Cardápio vazio"}), 200
+
+        print(f"Retornando {len(itens)} itens do cardápio")
+        return jsonify(itens), 200
+
+    except Exception as e:
+        print(f"ERRO no cardápio: {str(e)}")
+        return jsonify({"erro": "Erro interno ao buscar cardápio"}), 500
+
+# --- Inicialização ---
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
