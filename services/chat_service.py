@@ -71,6 +71,10 @@ class ChatService:
             print("DEBUG: Intenção 'consultar pedidos finalizados' detectada.")
             return self._consultar_pedidos(usuario_id, todos_os_pedidos_finalizados)
 
+        if self._intencao_cancelar_pedido(mensagem_processada):
+            print("DEBUG: Intenção 'cancelar pedido' detectada.")
+            return self._cancelar_pedido(usuario_id, pedido_em_aberto_doc, pedidos_em_aberto_collection)
+        
         if self._intencao_ver_status_pedido_aberto(mensagem_processada):
             print("DEBUG: Intenção 'ver status pedido aberto' detectada.")
             return self._responder_status_pedido_aberto(pedido_em_aberto_doc)
@@ -143,14 +147,13 @@ class ChatService:
         padroes = [
             "quero pedir", "fazer um pedido", "quero isso", "gostaria de", 
             "me vê", "pode ser", "pedido", "quero", "pedir", "adicionar ao pedido",
-            "colocar no pedido", "escolher", "vou querer", "me traga", "quero fazer um pedido",
-            "pdiddy"
+            "colocar no pedido", "escolher", "vou querer", "me traga", "quero fazer um pedido"
         ]
         return self._mensagem_similar(mensagem, padroes, limiar=70)
 
     def _intencao_finalizar_pedido(self, mensagem):
         padroes = [
-            "só isso", "so isso", "só", "so", "mais nada", "encerrar",
+            "só isso", "so isso", "só", "so", "não", "nao", "mais nada", "encerrar",
             "finalizar", "fechar pedido", "concluído", "concluido",
             "pedido concluído", "pedido concluido", "concluir", "terminar",
             "pode fechar", "está bom assim", "pronto", "acabou", "já está bom", "finalizar agora"
@@ -186,6 +189,35 @@ class ChatService:
         except Exception as e:
             print(f"ERRO ao finalizar pedido: {e}")
             return "❌ Ocorreu um erro ao finalizar seu pedido. Tente novamente."
+        
+    def _intencao_cancelar_pedido(self, mensagem):
+        padroes = [
+            "cancelar pedido", "quero cancelar", "anular pedido", "desistir do pedido",
+            "cancelar meu pedido", "não quero mais", "apagar pedido", "remover pedido"
+        ]
+        return self._mensagem_similar(mensagem, padroes, limiar=75) # Aumentei um pouco o limiar para ser mais preciso
+    
+    def _cancelar_pedido(self, usuario_id, pedido_em_aberto_doc, pedidos_em_aberto_collection):
+        try:
+            if not pedido_em_aberto_doc:
+                print(f"DEBUG Cancelar Pedido: Nenhum pedido em aberto para o usuario_id: {usuario_id}.")
+                return "Você não tem nenhum pedido em andamento para ser cancelado."
+
+            # Aqui, você pode adicionar uma etapa de confirmação se o chatbot fosse mais complexo
+            # Por simplicidade, vamos cancelar diretamente se a intenção for clara.
+            
+            resultado = pedidos_em_aberto_collection.delete_one({"_id": pedido_em_aberto_doc["_id"]})
+
+            if resultado.deleted_count > 0:
+                print(f"DEBUG Cancelar Pedido: Pedido em aberto para o usuario_id: {usuario_id} (ID: {pedido_em_aberto_doc['_id']}) cancelado com sucesso.")
+                return "✅ Seu pedido em andamento foi cancelado com sucesso."
+            else:
+                print(f"DEBUG Cancelar Pedido: Falha ao cancelar pedido (não encontrado após verificação) para o usuario_id: {usuario_id}.")
+                return "Não foi possível cancelar o pedido. Parece que ele já foi finalizado ou não existe mais."
+
+        except Exception as e:
+            print(f"ERRO ao cancelar pedido: {e}")
+            return "❌ Ocorreu um erro ao tentar cancelar seu pedido. Tente novamente mais tarde."
         
     def _extrair_quantidade_e_item(self, mensagem, cardapio_map_por_nome):
         original_mensagem = mensagem.lower().strip()

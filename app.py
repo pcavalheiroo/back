@@ -19,8 +19,6 @@ CORS(app)
 
 def validar_email(email):
     # Expressão regular para um formato de e-mail básico
-    # Esta regex é mais robusta para verificar o formato geral de e-mail.
-    # No entanto, a validação de domínio é feita separadamente.
     email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     
     # Domínios permitidos
@@ -32,7 +30,7 @@ def validar_email(email):
     # Verifica se o e-mail termina com um dos domínios permitidos
     for dominio in dominios_permitidos:
         if email.endswith(dominio):
-            return True, None
+            return True, None # E-mail válido, sem erro
             
     return False, "E-mail não pertence a um domínio permitido."
 
@@ -52,10 +50,7 @@ def login():
         # Validação do e-mail
         is_valido, mensagem_erro = validar_email(email)
         if not is_valido:
-            # Não é ideal retornar "Usuário não encontrado" ou "Senha incorreta" para e-mails inválidos.
-            # Uma mensagem mais genérica como "Credenciais inválidas" é melhor por segurança.
             return jsonify({"erro": "Credenciais inválidas"}), 401 
-
 
         usuario = database.usuarios.find_one({"email": email})
         if not usuario:
@@ -95,6 +90,13 @@ def cadastrar_usuario():
 
         if not email or not senha:
             return jsonify({"erro": "Email e senha obrigatórios"}), 400
+
+        # --- ADIÇÃO CRÍTICA AQUI: VALIDAÇÃO DE E-MAIL ---
+        is_valido, mensagem_erro = validar_email(email)
+        if not is_valido:
+            # Retorne um erro específico sobre a validação do e-mail
+            return jsonify({"erro": mensagem_erro}), 400 
+        # --- FIM DA ADIÇÃO ---
 
         if database.usuarios.find_one({"email": email}):
             return jsonify({"erro": "Usuário já existe"}), 409
@@ -193,7 +195,8 @@ def historico_mensagens():
                 "_id": str(msg["_id"]),
                 "mensagem": msg["mensagem"],
                 "origem": msg.get("origem") or msg.get("remetente"),
-                "data": (msg.get("data") or msg.get("timestamp")).isoformat()
+                # Adicione 'Z' ao final para indicar que é UTC
+                "data": (msg.get("data") or msg.get("timestamp")).isoformat() + 'Z' # <-- MUDANÇA AQUI
             } for msg in historico
         ]), 200
 
@@ -265,9 +268,11 @@ def get_historico_pedidos():
             pedido['_id'] = str(pedido['_id'])
             
             if 'data' in pedido and isinstance(pedido['data'], datetime):
-                pedido['data_pedido'] = pedido['data'].isoformat()
+                # Adicione 'Z' ao final para indicar que é UTC
+                pedido['data_pedido'] = pedido['data'].isoformat() + 'Z' # <-- MUDANÇA AQUI
             else:
-                pedido['data_pedido'] = datetime.utcnow().isoformat()
+                # Adicione 'Z' ao final para indicar que é UTC
+                pedido['data_pedido'] = datetime.utcnow().isoformat() + 'Z'
 
             total_pedido_calculado = 0
             itens_processados = []
