@@ -115,6 +115,188 @@ def cadastrar_usuario():
         print(f"Erro no cadastro: {str(e)}")
         return jsonify({"erro": "Erro interno no servidor"}), 500
 
+# ----------------------------------------------------------------------------
+
+@app.route("/admins/login", methods=["POST"])
+def admin_login():
+    try:
+        dados = request.get_json()
+        email = dados.get("email")
+        senha = dados.get("senha")
+
+        print(f"DEBUG BACKEND: Tentativa de login admin - Email: {email}, Senha Recebida (nao hash): {senha}")
+
+        admin = database.admins.find_one({"email": email})
+        if not admin:
+            print(f"DEBUG BACKEND: Admin com email '{email}' NAO ENCONTRADO.")
+            return jsonify({"erro": "Credenciais de administrador inválidas"}), 401
+
+        senha_hash_admin = admin.get("senha")
+        print(f"DEBUG BACKEND: Hash do DB (parcial): {senha_hash_admin[:10]}...") # Imprime só o começo do hash por segurança
+
+        if senha_hash_admin is None:
+            print("DEBUG BACKEND: Campo 'senha' ausente para o admin no DB.")
+            return jsonify({"erro": "Erro de configuração do administrador"}), 500
+
+        # Converta a senha recebida para bytes e o hash do DB para bytes (se ainda não for)
+        senha_recebida_bytes = senha.encode('utf-8')
+        senha_hash_db_bytes = senha_hash_admin.encode('utf-8') if isinstance(senha_hash_admin, str) else senha_hash_admin
+
+        print(f"DEBUG BACKEND: Chamando bcrypt.checkpw com senha_recebida_bytes e senha_hash_db_bytes.")
+        valido = bcrypt.checkpw(senha_recebida_bytes, senha_hash_db_bytes)
+        
+        if valido:
+            print(f"DEBUG BACKEND: Senha VALIDADA com sucesso para email: {email}.")
+            admin["_id"] = str(admin["_id"])
+            admin.pop("senha", None)
+            return jsonify(admin), 200
+        else:
+            print(f"DEBUG BACKEND: Senha INAVALIDA para email: {email}. bcrypt.checkpw retornou False.")
+            return jsonify({"erro": "Credenciais de administrador inválidas"}), 401
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO no login do administrador: {str(e)}") # Log mais detalhado
+        return jsonify({"erro": "Erro interno no servidor"}), 500
+    
+# --- Rotas de Gerenciamento de Cardápio (Administrador) ---
+
+@app.route('/admin/cardapio', methods=['POST'])
+# @admin_required # Em um sistema real, adicione um decorador de autenticação de admin
+def add_menu_item():
+    try:
+        dados = request.get_json()
+        required_fields = ['nome', 'preco', 'categoria', 'descricao', 'disponibilidade']
+        if not all(field in dados for field in required_fields):
+            return jsonify({"erro": "Campos obrigatórios faltando"}), 400
+        
+        # Opcional: Validação de tipos para preco (float) e disponibilidade (boolean)
+
+        result = database.cardapio.insert_one(dados)
+        return jsonify({"mensagem": "Item adicionado com sucesso!", "item_id": str(result.inserted_id)}), 201
+    except Exception as e:
+        print(f"ERRO ao adicionar item do cardápio: {str(e)}")
+        return jsonify({"erro": "Erro interno ao adicionar item do cardápio"}), 500
+
+@app.route('/admin/cardapio/<item_id>', methods=['PUT'])
+# @admin_required
+def update_menu_item(item_id):
+    try:
+        dados = request.get_json()
+        if not dados:
+            return jsonify({"erro": "Dados não fornecidos"}), 400
+
+        result = database.cardapio.update_one({"_id": ObjectId(item_id)}, {"$set": dados})
+
+        if result.modified_count > 0:
+            return jsonify({"mensagem": "Item atualizado com sucesso!"}), 200
+        else:
+            return jsonify({"erro": "Item não encontrado ou nenhum dado para atualizar"}), 404
+    except Exception as e:
+        print(f"ERRO ao atualizar item do cardápio: {str(e)}")
+        return jsonify({"erro": "Erro interno ao atualizar item do cardápio"}), 500
+
+@app.route('/admin/cardapio/<item_id>', methods=['DELETE'])
+# @admin_required
+def delete_menu_item(item_id):
+    try:
+        result = database.cardapio.delete_one({"_id": ObjectId(item_id)})
+        if result.deleted_count > 0:
+            return jsonify({"mensagem": "Item excluído com sucesso!"}), 200
+        else:
+            return jsonify({"erro": "Item não encontrado"}), 404
+    except Exception as e:
+        print(f"ERRO ao excluir item do cardápio: {str(e)}")
+        return jsonify({"erro": "Erro interno ao excluir item do cardápio"}), 500
+
+@app.route('/admin/cardapio/todos', methods=['GET'])
+# @admin_required
+def get_all_menu_items():
+    try:
+        itens = list(database.cardapio.find({}).sort([("categoria", 1), ("nome", 1)]))
+        for item in itens:
+            item['_id'] = str(item['_id'])
+        return jsonify(itens), 200
+    except Exception as e:
+        print(f"ERRO ao buscar todos os itens do cardápio: {str(e)}")
+        return jsonify({"erro": "Erro interno ao buscar itens do cardápio"}), 500
+
+# --- Rotas de Gerenciamento de Pedidos (Administrador) ---
+
+@app.route('/admin/pedidos/todos', methods=['GET'])
+# @admin_required
+def get_all_orders():
+    try:
+        pedidos_cursor = database.pedidos.find().sort("data", -1)
+        pedidos_formatados = []
+        for pedido in pedidos_cursor:
+            pedido['_id'] = str(pedido['_id'])
+            if 'data' in pedido and isinstance(pedido['data'], datetime):
+                pedido['data_pedido'] = pedido['data'].isoformat() + 'Z' # Garante UTC
+            else:
+                pedido['data_pedido'] = datetime.utcnow().isoformat() + 'Z' # Fallback
+            
+            # Garante que os itens são dicionários (tratamento para dados inconsistentes)
+            processo_itens = []
+            for item in pedido.get('itens', []):
+                if isinstance(item, dict):
+                    item['_id'] = str(item.get('_id', ObjectId())) # Garante _id como string
+                    processo_itens.append(item)
+                else:
+                    # Log ou trate itens mal formatados
+                    print(f"AVISO: Item de pedido mal formatado encontrado: {item} no pedido {pedido['_id']}")
+                    processo_itens.append({"nome": str(item), "quantidade": 1, "preco": 0.00, "_id": str(ObjectId())}) # Tenta um fallback
+            pedido['itens'] = processo_itens
+            
+            # Opcional: Buscar nome/email do usuário para o pedido
+            usuario = database.usuarios.find_one({"_id": ObjectId(pedido['usuario_id'])})
+            pedido['usuario_info'] = {"nome": usuario.get("email"), "id": str(usuario["_id"])} if usuario else {"nome": "Desconhecido", "id": pedido['usuario_id']}
+
+            pedidos_formatados.append(pedido)
+            
+        return jsonify(pedidos_formatados), 200
+    except Exception as e:
+        print(f"ERRO ao buscar todos os pedidos: {str(e)}")
+        return jsonify({"erro": "Erro interno ao buscar todos os pedidos"}), 500
+
+@app.route('/admin/pedidos/<pedido_id>/status', methods=['PUT'])
+# @admin_required
+def update_order_status(pedido_id):
+    try:
+        dados = request.get_json()
+        novo_status = dados.get('status')
+        if not novo_status:
+            return jsonify({"erro": "Status é obrigatório"}), 400
+        
+        allowed_statuses = ['pendente', 'em preparo', 'pronto', 'finalizado', 'cancelado']
+        if novo_status not in allowed_statuses:
+            return jsonify({"erro": f"Status inválido. Use um de: {', '.join(allowed_statuses)}"}), 400
+
+        result = database.pedidos.update_one(
+            {"_id": ObjectId(pedido_id)},
+            {"$set": {"status": novo_status, "data_atualizacao_status": datetime.utcnow()}}
+        )
+
+        if result.modified_count > 0:
+            return jsonify({"mensagem": "Status do pedido atualizado com sucesso!", "novo_status": novo_status}), 200
+        else:
+            return jsonify({"erro": "Pedido não encontrado ou status já é o mesmo"}), 404
+    except Exception as e:
+        print(f"ERRO ao atualizar status do pedido: {str(e)}")
+        return jsonify({"erro": "Erro interno ao atualizar status do pedido"}), 500
+
+@app.route('/admin/pedidos/<pedido_id>', methods=['DELETE'])
+# @admin_required
+def delete_order(pedido_id):
+    try:
+        result = database.pedidos.delete_one({"_id": ObjectId(pedido_id)})
+        if result.deleted_count > 0:
+            return jsonify({"mensagem": "Pedido excluído com sucesso!"}), 200
+        else:
+            return jsonify({"erro": "Pedido não encontrado"}), 404
+    except Exception as e:
+        print(f"ERRO ao excluir pedido: {str(e)}")
+        return jsonify({"erro": "Erro interno ao excluir pedido"}), 500 
+
 # --- Rotas do Chat ---
 
 @app.route("/chat", methods=["POST"])
