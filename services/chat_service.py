@@ -166,6 +166,12 @@ class ChatService:
                 print(f"DEBUG Finalizar Pedido: Nenhum pedido em aberto ou sem itens para o usuario_id: {usuario_id}")
                 return "Você ainda não iniciou um pedido ou não há itens para finalizar."
 
+            # Calcula o total aqui no momento de finalizar o pedido
+            total_calculado_no_fechamento = 0
+            for item in pedido_em_aberto_doc.get("itens", []):
+                item_preco = float(item.get("preco", 0.00))
+                item_quantidade = int(item.get("quantidade", 1))
+                total_calculado_no_fechamento += (item_preco * item_quantidade)
             # Extrai os nomes dos itens para a mensagem de resposta
             # Usa uma list comprehension para pegar apenas o 'nome' de cada dicionário de item
             nomes_dos_itens_para_resposta = [item['nome'] for item in pedido_em_aberto_doc['itens']]
@@ -174,7 +180,8 @@ class ChatService:
                 "usuario_id": usuario_id,
                 "itens": pedido_em_aberto_doc["itens"], # Aqui, continua sendo a lista de dicionários!
                 "data": datetime.utcnow(), 
-                "status": "recebido"
+                "status": "recebido",
+                "total": total_calculado_no_fechamento # <-- NOVO: Adiciona o total ao pedido final
             }
             
             pedidos_collection.insert_one(pedido_final)

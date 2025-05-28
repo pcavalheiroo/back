@@ -158,6 +158,107 @@ def admin_login():
         print(f"ERRO CRÍTICO no login do administrador: {str(e)}") # Log mais detalhado
         return jsonify({"erro": "Erro interno no servidor"}), 500
     
+# --- Rotas de Gerenciamento de Usuário (Administrador) ---
+    
+@app.route('/admin/usuarios/todos', methods=['GET'])
+# @admin_required # Em um sistema real, adicione um decorador de autenticação de admin
+def get_all_users_admin():
+    try:
+        users = list(database.usuarios.find({}, {"senha": 0})) # Não retorna a senha hashed
+        for user in users:
+            user['_id'] = str(user['_id'])
+        return jsonify(users), 200
+    except Exception as e:
+        print(f"ERRO ao buscar todos os usuários: {str(e)}")
+        return jsonify({"erro": "Erro interno ao buscar usuários"}), 500
+
+@app.route('/admin/usuarios', methods=['POST'])
+# @admin_required
+def add_user_admin():
+    try:
+        dados = request.get_json()
+        email = dados.get('email')
+        senha = dados.get('senha')
+        role = dados.get('role', 'user') # Padrão 'user' se não especificado
+
+        if not email or not senha:
+            return jsonify({"erro": "Email e senha são obrigatórios"}), 400
+        
+        # Validação do e-mail (reutiliza a função existente)
+        is_valido, mensagem_erro = validar_email(email)
+        if not is_valido:
+            return jsonify({"erro": mensagem_erro}), 400 
+
+        if database.usuarios.find_one({"email": email}):
+            return jsonify({"erro": "Usuário já existe"}), 409
+
+        senha_hash = bcrypt.hashpw(senha.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+        database.usuarios.insert_one({
+            "email": email,
+            "senha": senha_hash,
+            "role": role, # Salva o papel do usuário (user/admin)
+            "criado_em": datetime.utcnow()
+        })
+        return jsonify({"mensagem": "Usuário adicionado com sucesso!", "email": email, "role": role}), 201
+    except Exception as e:
+        print(f"ERRO ao adicionar usuário: {str(e)}")
+        return jsonify({"erro": "Erro interno ao adicionar usuário"}), 500
+
+@app.route('/admin/usuarios/<user_id>', methods=['DELETE'])
+# @admin_required
+def delete_user_admin(user_id):
+    try:
+        result = database.usuarios.delete_one({"_id": ObjectId(user_id)})
+        if result.deleted_count > 0:
+            return jsonify({"mensagem": "Usuário excluído com sucesso!"}), 200
+        else:
+            return jsonify({"erro": "Usuário não encontrado"}), 404
+    except Exception as e:
+        print(f"ERRO ao excluir usuário: {str(e)}")
+        return jsonify({"erro": "Erro interno ao excluir usuário"}), 500
+
+@app.route('/admin/usuarios/<user_id>', methods=['PUT']) # Opcional: para editar senha, role, etc.
+# @admin_required
+def update_user_admin(user_id):
+    try:
+        dados = request.get_json()
+        if not dados:
+            return jsonify({"erro": "Dados não fornecidos"}), 400
+        
+        update_fields = {}
+        if 'email' in dados:
+            # Validação do novo e-mail se for alterado
+            is_valido, mensagem_erro = validar_email(dados['email'])
+            if not is_valido:
+                return jsonify({"erro": mensagem_erro}), 400
+            # Evita alterar para um email que já existe (exceto se for o próprio usuário)
+            if database.usuarios.find_one({"email": dados['email'], "_id": {"$ne": ObjectId(user_id)}}):
+                return jsonify({"erro": "Email já em uso por outro usuário"}), 409
+            update_fields['email'] = dados['email']
+        
+        if 'senha' in dados:
+            senha_hash = bcrypt.hashpw(dados['senha'].encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            update_fields['senha'] = senha_hash
+        
+        if 'role' in dados:
+            if dados['role'] not in ['user', 'admin']: # Tipos de role permitidos
+                return jsonify({"erro": "Role inválido"}), 400
+            update_fields['role'] = dados['role']
+
+        if not update_fields:
+            return jsonify({"mensagem": "Nenhum campo para atualizar"}), 200
+
+        result = database.usuarios.update_one({"_id": ObjectId(user_id)}, {"$set": update_fields})
+
+        if result.modified_count > 0:
+            return jsonify({"mensagem": "Usuário atualizado com sucesso!"}), 200
+        else:
+            return jsonify({"erro": "Usuário não encontrado ou nenhum dado para atualizar"}), 404
+    except Exception as e:
+        print(f"ERRO ao atualizar usuário: {str(e)}")
+        return jsonify({"erro": "Erro interno ao atualizar usuário"}), 500
+    
 # --- Rotas de Gerenciamento de Cardápio (Administrador) ---
 
 @app.route('/admin/cardapio', methods=['POST'])
@@ -237,15 +338,22 @@ def get_all_orders():
             
             # Garante que os itens são dicionários (tratamento para dados inconsistentes)
             processo_itens = []
+            total_calculado_pedido = 0 # <-- NOVO: Inicializa o total para este pedido
             for item in pedido.get('itens', []):
                 if isinstance(item, dict):
-                    item['_id'] = str(item.get('_id', ObjectId())) # Garante _id como string
+                    item['_id'] = str(item.get('_id', ObjectId()))
+                    # Garante que preco e quantidade são números válidos para o cálculo
+                    item_preco = float(item.get('preco', 0.00))
+                    item_quantidade = int(item.get('quantidade', 1))
+                    
+                    total_calculado_pedido += (item_preco * item_quantidade) # <-- NOVO: Calcula o total
                     processo_itens.append(item)
                 else:
-                    # Log ou trate itens mal formatados
                     print(f"AVISO: Item de pedido mal formatado encontrado: {item} no pedido {pedido['_id']}")
-                    processo_itens.append({"nome": str(item), "quantidade": 1, "preco": 0.00, "_id": str(ObjectId())}) # Tenta um fallback
+                    processo_itens.append({"nome": str(item), "quantidade": 1, "preco": 0.00, "_id": str(ObjectId())})
+            
             pedido['itens'] = processo_itens
+            pedido['total'] = total_calculado_pedido # <-- NOVO: Adiciona o total calculado ao pedido
             
             # Opcional: Buscar nome/email do usuário para o pedido
             usuario = database.usuarios.find_one({"_id": ObjectId(pedido['usuario_id'])})
