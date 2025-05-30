@@ -180,7 +180,7 @@ class ChatService:
                 "usuario_id": usuario_id,
                 "itens": pedido_em_aberto_doc["itens"], # Aqui, continua sendo a lista de dicionários!
                 "data": datetime.utcnow(), 
-                "status": "recebido",
+                "status": "em preparo",
                 "total": total_calculado_no_fechamento # <-- NOVO: Adiciona o total ao pedido final
             }
             
