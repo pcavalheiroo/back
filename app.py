@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from db.connection import database
@@ -18,19 +17,16 @@ CORS(app)
 # --- Rotas Usuários ---
 
 def validar_email(email):
-    # Expressão regular para um formato de e-mail básico
     email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     
-    # Domínios permitidos
     dominios_permitidos = ["@p4ed.com", "@sistemapoliedro.com.br"]
 
     if not re.match(email_regex, email):
         return False, "Formato de e-mail inválido."
 
-    # Verifica se o e-mail termina com um dos domínios permitidos
     for dominio in dominios_permitidos:
         if email.endswith(dominio):
-            return True, None # E-mail válido, sem erro
+            return True, None
             
     return False, "E-mail não pertence a um domínio permitido."
 
@@ -54,14 +50,13 @@ def login():
 
         usuario = database.usuarios.find_one({"email": email})
         if not usuario:
-            return jsonify({"erro": "Credenciais inválidas"}), 401 # Mensagem genérica por segurança
+            return jsonify({"erro": "Credenciais inválidas"}), 401
 
         senha_hash = usuario.get("senha")
 
         if senha_hash is None:
-            return jsonify({"erro": "Erro de configuração do usuário"}), 500 # Melhor mensagem para este caso
+            return jsonify({"erro": "Erro de configuração do usuário"}), 500
 
-        # senha_hash pode estar como bytes ou string
         if isinstance(senha_hash, bytes):
             valido = bcrypt.checkpw(senha.encode('utf-8'), senha_hash)
         else:
@@ -72,7 +67,7 @@ def login():
             usuario.pop("senha", None)
             return jsonify(usuario), 200
 
-        return jsonify({"erro": "Credenciais inválidas"}), 401 # Mensagem genérica por segurança
+        return jsonify({"erro": "Credenciais inválidas"}), 401
 
     except Exception as e:
         print(f"Erro no login: {str(e)}")
@@ -91,12 +86,11 @@ def cadastrar_usuario():
         if not email or not senha:
             return jsonify({"erro": "Email e senha obrigatórios"}), 400
 
-        # --- ADIÇÃO CRÍTICA AQUI: VALIDAÇÃO DE E-MAIL ---
         is_valido, mensagem_erro = validar_email(email)
         if not is_valido:
-            # Retorne um erro específico sobre a validação do e-mail
+
             return jsonify({"erro": mensagem_erro}), 400 
-        # --- FIM DA ADIÇÃO ---
+
 
         if database.usuarios.find_one({"email": email}):
             return jsonify({"erro": "Usuário já existe"}), 409
@@ -132,13 +126,12 @@ def admin_login():
             return jsonify({"erro": "Credenciais de administrador inválidas"}), 401
 
         senha_hash_admin = admin.get("senha")
-        print(f"DEBUG BACKEND: Hash do DB (parcial): {senha_hash_admin[:10]}...") # Imprime só o começo do hash por segurança
+        print(f"DEBUG BACKEND: Hash do DB (parcial): {senha_hash_admin[:10]}...")
 
         if senha_hash_admin is None:
             print("DEBUG BACKEND: Campo 'senha' ausente para o admin no DB.")
             return jsonify({"erro": "Erro de configuração do administrador"}), 500
 
-        # Converta a senha recebida para bytes e o hash do DB para bytes (se ainda não for)
         senha_recebida_bytes = senha.encode('utf-8')
         senha_hash_db_bytes = senha_hash_admin.encode('utf-8') if isinstance(senha_hash_admin, str) else senha_hash_admin
 
@@ -155,16 +148,16 @@ def admin_login():
             return jsonify({"erro": "Credenciais de administrador inválidas"}), 401
 
     except Exception as e:
-        print(f"ERRO CRÍTICO no login do administrador: {str(e)}") # Log mais detalhado
+        print(f"ERRO CRÍTICO no login do administrador: {str(e)}")
         return jsonify({"erro": "Erro interno no servidor"}), 500
     
 # --- Rotas de Gerenciamento de Usuário (Administrador) ---
     
 @app.route('/admin/usuarios/todos', methods=['GET'])
-# @admin_required # Em um sistema real, adicione um decorador de autenticação de admin
+
 def get_all_users_admin():
     try:
-        users = list(database.usuarios.find({}, {"senha": 0})) # Não retorna a senha hashed
+        users = list(database.usuarios.find({}, {"senha": 0}))
         for user in users:
             user['_id'] = str(user['_id'])
         return jsonify(users), 200
@@ -173,18 +166,18 @@ def get_all_users_admin():
         return jsonify({"erro": "Erro interno ao buscar usuários"}), 500
 
 @app.route('/admin/usuarios', methods=['POST'])
-# @admin_required
+
 def add_user_admin():
     try:
         dados = request.get_json()
         email = dados.get('email')
         senha = dados.get('senha')
-        role = dados.get('role', 'user') # Padrão 'user' se não especificado
+        role = dados.get('role', 'user')
 
         if not email or not senha:
             return jsonify({"erro": "Email e senha são obrigatórios"}), 400
         
-        # Validação do e-mail (reutiliza a função existente)
+        # Validação do e-mail
         is_valido, mensagem_erro = validar_email(email)
         if not is_valido:
             return jsonify({"erro": mensagem_erro}), 400 
@@ -197,7 +190,7 @@ def add_user_admin():
         database.usuarios.insert_one({
             "email": email,
             "senha": senha_hash,
-            "role": role, # Salva o papel do usuário (user/admin)
+            "role": role,
             "criado_em": datetime.utcnow()
         })
         return jsonify({"mensagem": "Usuário adicionado com sucesso!", "email": email, "role": role}), 201
@@ -206,7 +199,6 @@ def add_user_admin():
         return jsonify({"erro": "Erro interno ao adicionar usuário"}), 500
 
 @app.route('/admin/usuarios/<user_id>', methods=['DELETE'])
-# @admin_required
 def delete_user_admin(user_id):
     try:
         result = database.usuarios.delete_one({"_id": ObjectId(user_id)})
@@ -218,8 +210,7 @@ def delete_user_admin(user_id):
         print(f"ERRO ao excluir usuário: {str(e)}")
         return jsonify({"erro": "Erro interno ao excluir usuário"}), 500
 
-@app.route('/admin/usuarios/<user_id>', methods=['PUT']) # Opcional: para editar senha, role, etc.
-# @admin_required
+@app.route('/admin/usuarios/<user_id>', methods=['PUT'])
 def update_user_admin(user_id):
     try:
         dados = request.get_json()
@@ -228,11 +219,11 @@ def update_user_admin(user_id):
         
         update_fields = {}
         if 'email' in dados:
-            # Validação do novo e-mail se for alterado
+            # Validação do novo e-mail
             is_valido, mensagem_erro = validar_email(dados['email'])
             if not is_valido:
                 return jsonify({"erro": mensagem_erro}), 400
-            # Evita alterar para um email que já existe (exceto se for o próprio usuário)
+            # Evita alterar para um email que já existe
             if database.usuarios.find_one({"email": dados['email'], "_id": {"$ne": ObjectId(user_id)}}):
                 return jsonify({"erro": "Email já em uso por outro usuário"}), 409
             update_fields['email'] = dados['email']
@@ -242,7 +233,7 @@ def update_user_admin(user_id):
             update_fields['senha'] = senha_hash
         
         if 'role' in dados:
-            if dados['role'] not in ['user', 'admin']: # Tipos de role permitidos
+            if dados['role'] not in ['user', 'admin']:
                 return jsonify({"erro": "Role inválido"}), 400
             update_fields['role'] = dados['role']
 
@@ -262,15 +253,12 @@ def update_user_admin(user_id):
 # --- Rotas de Gerenciamento de Cardápio (Administrador) ---
 
 @app.route('/admin/cardapio', methods=['POST'])
-# @admin_required # Em um sistema real, adicione um decorador de autenticação de admin
 def add_menu_item():
     try:
         dados = request.get_json()
         required_fields = ['nome', 'preco', 'categoria', 'descricao', 'disponibilidade']
         if not all(field in dados for field in required_fields):
             return jsonify({"erro": "Campos obrigatórios faltando"}), 400
-        
-        # Opcional: Validação de tipos para preco (float) e disponibilidade (boolean)
 
         result = database.cardapio.insert_one(dados)
         return jsonify({"mensagem": "Item adicionado com sucesso!", "item_id": str(result.inserted_id)}), 201
@@ -279,7 +267,6 @@ def add_menu_item():
         return jsonify({"erro": "Erro interno ao adicionar item do cardápio"}), 500
 
 @app.route('/admin/cardapio/<item_id>', methods=['PUT'])
-# @admin_required
 def update_menu_item(item_id):
     try:
         dados = request.get_json()
@@ -297,7 +284,6 @@ def update_menu_item(item_id):
         return jsonify({"erro": "Erro interno ao atualizar item do cardápio"}), 500
 
 @app.route('/admin/cardapio/<item_id>', methods=['DELETE'])
-# @admin_required
 def delete_menu_item(item_id):
     try:
         result = database.cardapio.delete_one({"_id": ObjectId(item_id)})
@@ -310,7 +296,6 @@ def delete_menu_item(item_id):
         return jsonify({"erro": "Erro interno ao excluir item do cardápio"}), 500
 
 @app.route('/admin/cardapio/todos', methods=['GET'])
-# @admin_required
 def get_all_menu_items():
     try:
         itens = list(database.cardapio.find({}).sort([("categoria", 1), ("nome", 1)]))
@@ -324,7 +309,6 @@ def get_all_menu_items():
 # --- Rotas de Gerenciamento de Pedidos (Administrador) ---
 
 @app.route('/admin/pedidos/todos', methods=['GET'])
-# @admin_required
 def get_all_orders():
     try:
         pedidos_cursor = database.pedidos.find().sort("data", -1)
@@ -332,30 +316,27 @@ def get_all_orders():
         for pedido in pedidos_cursor:
             pedido['_id'] = str(pedido['_id'])
             if 'data' in pedido and isinstance(pedido['data'], datetime):
-                pedido['data_pedido'] = pedido['data'].isoformat() + 'Z' # Garante UTC
+                pedido['data_pedido'] = pedido['data'].isoformat() + 'Z'
             else:
-                pedido['data_pedido'] = datetime.utcnow().isoformat() + 'Z' # Fallback
+                pedido['data_pedido'] = datetime.utcnow().isoformat() + 'Z'
             
-            # Garante que os itens são dicionários (tratamento para dados inconsistentes)
             processo_itens = []
-            total_calculado_pedido = 0 # <-- NOVO: Inicializa o total para este pedido
+            total_calculado_pedido = 0
             for item in pedido.get('itens', []):
                 if isinstance(item, dict):
                     item['_id'] = str(item.get('_id', ObjectId()))
-                    # Garante que preco e quantidade são números válidos para o cálculo
                     item_preco = float(item.get('preco', 0.00))
                     item_quantidade = int(item.get('quantidade', 1))
                     
-                    total_calculado_pedido += (item_preco * item_quantidade) # <-- NOVO: Calcula o total
+                    total_calculado_pedido += (item_preco * item_quantidade)
                     processo_itens.append(item)
                 else:
                     print(f"AVISO: Item de pedido mal formatado encontrado: {item} no pedido {pedido['_id']}")
                     processo_itens.append({"nome": str(item), "quantidade": 1, "preco": 0.00, "_id": str(ObjectId())})
             
             pedido['itens'] = processo_itens
-            pedido['total'] = total_calculado_pedido # <-- NOVO: Adiciona o total calculado ao pedido
-            
-            # Opcional: Buscar nome/email do usuário para o pedido
+            pedido['total'] = total_calculado_pedido 
+
             usuario = database.usuarios.find_one({"_id": ObjectId(pedido['usuario_id'])})
             pedido['usuario_info'] = {"nome": usuario.get("email"), "id": str(usuario["_id"])} if usuario else {"nome": "Desconhecido", "id": pedido['usuario_id']}
 
@@ -367,7 +348,6 @@ def get_all_orders():
         return jsonify({"erro": "Erro interno ao buscar todos os pedidos"}), 500
 
 @app.route('/admin/pedidos/<pedido_id>/status', methods=['PUT'])
-# @admin_required
 def update_order_status(pedido_id):
     try:
         dados = request.get_json()
@@ -393,7 +373,6 @@ def update_order_status(pedido_id):
         return jsonify({"erro": "Erro interno ao atualizar status do pedido"}), 500
 
 @app.route('/admin/pedidos/<pedido_id>', methods=['DELETE'])
-# @admin_required
 def delete_order(pedido_id):
     try:
         result = database.pedidos.delete_one({"_id": ObjectId(pedido_id)})
@@ -439,8 +418,8 @@ def enviar_mensagem():
             pedido_em_aberto_usuario,
             todos_os_pedidos_finalizados,
             cardapio_disponivel,
-            database.pedidos_em_aberto, # Coleção de pedidos em aberto
-            database.pedidos            # Coleção de pedidos finalizados
+            database.pedidos_em_aberto,
+            database.pedidos
         )
 
         result_usuario = database.mensagens.insert_one({
@@ -522,11 +501,9 @@ def get_cardapio():
 
         itens = list(database.cardapio.find(
             {"disponibilidade": True},
-            # Inclua todos os campos necessários e o _id!
             {"_id": 1, "nome": 1, "preco": 1, "categoria": 1, "descricao": 1, "disponibilidade": 1} 
         ).sort([("categoria", 1), ("nome", 1)]))
 
-        # É ABSOLUTAMENTE ESSENCIAL converter o ObjectId para string
         for item in itens:
             item['_id'] = str(item['_id'])
 
@@ -558,32 +535,26 @@ def get_historico_pedidos():
             pedido['_id'] = str(pedido['_id'])
             
             if 'data' in pedido and isinstance(pedido['data'], datetime):
-                # Adicione 'Z' ao final para indicar que é UTC
-                pedido['data_pedido'] = pedido['data'].isoformat() + 'Z' # <-- MUDANÇA AQUI
+                pedido['data_pedido'] = pedido['data'].isoformat() + 'Z'
             else:
-                # Adicione 'Z' ao final para indicar que é UTC
                 pedido['data_pedido'] = datetime.utcnow().isoformat() + 'Z'
 
             total_pedido_calculado = 0
             itens_processados = []
 
             for item_pedido_original in pedido.get('itens', []):
-                # --- ADIÇÃO DE VERIFICAÇÃO DE TIPO AQUI ---
                 if not isinstance(item_pedido_original, dict):
                     print(f"AVISO: Item de pedido mal formatado encontrado (não é um dicionário): '{item_pedido_original}' no pedido ID: {pedido['_id']}. Pulando este item.")
-                    continue  # Pula este item e vai para o próximo
-                # --- FIM DA ADIÇÃO ---
+                    continue
 
                 nome_item = item_pedido_original.get('nome') 
                 quantidade_item = item_pedido_original.get('quantidade', 1) 
 
                 preco_item = 0.00
                 
-                # Sua lógica de busca de preço no cardápio é boa
                 if nome_item in cardapio_map:
                     preco_item = cardapio_map[nome_item].get('preco', 0.00)
                 else:
-                    # Se o item do pedido não está no cardápio, pega o preço direto do item se existir
                     preco_item = item_pedido_original.get('preco', 0.00)
 
                 itens_processados.append({

@@ -1,14 +1,13 @@
 from datetime import datetime
 from thefuzz import fuzz
-import pytz # Importe a biblioteca pytz
-from babel.dates import format_datetime # Importe format_datetime do Babel
+import pytz
+from babel.dates import format_datetime
 from bson.objectid import ObjectId
 import re
 
 class ChatService:
 
     def __init__(self):
-        # Defina o fuso horário local aqui (Ex: São Paulo)
         self.timezone_sp = pytz.timezone('America/Sao_Paulo')
         self.numero_para_digito = {
             "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3,
@@ -22,7 +21,7 @@ class ChatService:
         for padrao in padroes:
             score_partial = fuzz.partial_ratio(mensagem, padrao.lower())
             score_ratio = fuzz.ratio(mensagem, padrao.lower())
-            score_token_set = fuzz.token_set_ratio(mensagem, padrao.lower()) # Adicionado para robustez
+            score_token_set = fuzz.token_set_ratio(mensagem, padrao.lower())
             
             if score_partial >= limiar or score_ratio >= limiar or score_token_set >= limiar:
                 return True
@@ -35,10 +34,10 @@ class ChatService:
         nomes_produtos = [p['nome'].lower() for p in cardapio_data if 'nome' in p]
         
         for nome_produto in nomes_produtos:
-            # Usando token_set_ratio e partial_ratio para maior flexibilidade
+            
             if fuzz.partial_ratio(mensagem, nome_produto) >= 80 or \
                fuzz.token_sort_ratio(mensagem, nome_produto) >= 80 or \
-               fuzz.token_set_ratio(mensagem, nome_produto) >= 80: # Adicionado token_set_ratio
+               fuzz.token_set_ratio(mensagem, nome_produto) >= 80:
                 return True
         return False
 
@@ -166,22 +165,20 @@ class ChatService:
                 print(f"DEBUG Finalizar Pedido: Nenhum pedido em aberto ou sem itens para o usuario_id: {usuario_id}")
                 return "Você ainda não iniciou um pedido ou não há itens para finalizar."
 
-            # Calcula o total aqui no momento de finalizar o pedido
             total_calculado_no_fechamento = 0
             for item in pedido_em_aberto_doc.get("itens", []):
                 item_preco = float(item.get("preco", 0.00))
                 item_quantidade = int(item.get("quantidade", 1))
                 total_calculado_no_fechamento += (item_preco * item_quantidade)
-            # Extrai os nomes dos itens para a mensagem de resposta
-            # Usa uma list comprehension para pegar apenas o 'nome' de cada dicionário de item
+
             nomes_dos_itens_para_resposta = [item['nome'] for item in pedido_em_aberto_doc['itens']]
 
             pedido_final = {
                 "usuario_id": usuario_id,
-                "itens": pedido_em_aberto_doc["itens"], # Aqui, continua sendo a lista de dicionários!
+                "itens": pedido_em_aberto_doc["itens"],
                 "data": datetime.utcnow(), 
                 "status": "em preparo",
-                "total": total_calculado_no_fechamento # <-- NOVO: Adiciona o total ao pedido final
+                "total": total_calculado_no_fechamento
             }
             
             pedidos_collection.insert_one(pedido_final)
@@ -190,7 +187,6 @@ class ChatService:
             pedidos_em_aberto_collection.delete_one({"_id": pedido_em_aberto_doc["_id"]})
             print(f"DEBUG Finalizar Pedido: Pedido em aberto deletado da coleção 'pedidos_em_aberto' para _id: {pedido_em_aberto_doc['_id']}")
 
-            # Usa a lista de nomes extraídos para a resposta
             return f"✅ Pedido finalizado com os itens: {', '.join(nomes_dos_itens_para_resposta)}. Em breve entraremos em contato para confirmar."
 
         except Exception as e:
@@ -202,16 +198,13 @@ class ChatService:
             "cancelar pedido", "quero cancelar", "anular pedido", "desistir do pedido",
             "cancelar meu pedido", "não quero mais", "apagar pedido", "remover pedido"
         ]
-        return self._mensagem_similar(mensagem, padroes, limiar=75) # Aumentei um pouco o limiar para ser mais preciso
+        return self._mensagem_similar(mensagem, padroes, limiar=75)
     
     def _cancelar_pedido(self, usuario_id, pedido_em_aberto_doc, pedidos_em_aberto_collection):
         try:
             if not pedido_em_aberto_doc:
                 print(f"DEBUG Cancelar Pedido: Nenhum pedido em aberto para o usuario_id: {usuario_id}.")
                 return "Você não tem nenhum pedido em andamento para ser cancelado."
-
-            # Aqui, você pode adicionar uma etapa de confirmação se o chatbot fosse mais complexo
-            # Por simplicidade, vamos cancelar diretamente se a intenção for clara.
             
             resultado = pedidos_em_aberto_collection.delete_one({"_id": pedido_em_aberto_doc["_id"]})
 
@@ -253,8 +246,7 @@ class ChatService:
 
                 print(f"DEBUG: Janela de busca para quantidade: '{search_window}'")
 
-                # AQUI É ONDE ELE USA self.quantidade_pattern
-                qtd_match = re.search(self.quantidade_pattern, search_window) # <--- O ERRO ESTÁ RELACIONADO A ESSE ACESSO
+                qtd_match = re.search(self.quantidade_pattern, search_window)
 
                 if qtd_match:
                     if qtd_match.group(1): 
@@ -287,12 +279,10 @@ class ChatService:
     def _registrar_pedido(self, usuario_id, mensagem, pedido_em_aberto_doc, cardapio_data, pedidos_em_aberto_collection):
         try:
             itens_para_adicionar_ao_banco = []
-            resposta_itens_adicionados_ao_usuario = [] # Para a mensagem de resposta ao usuário
+            resposta_itens_adicionados_ao_usuario = []
 
-            # Mapeia o cardápio por nome (lower case) para fácil acesso
             cardapio_map_por_nome = {item['nome'].lower(): item for item in cardapio_data if 'nome' in item}
 
-            # Usa a nova função para extrair itens com suas quantidades
             itens_encontrados = self._extrair_quantidade_e_item(mensagem, cardapio_map_por_nome)
 
             if not itens_encontrados:
@@ -321,11 +311,10 @@ class ChatService:
 
                 for novo_item_obj in itens_para_adicionar_ao_banco:
                     if novo_item_obj['nome'].lower() in itens_existentes_map:
-                        # Item já existe, atualiza a quantidade. Você pode somar ou substituir.
-                        # Somando as quantidades se o item já está no pedido:
+
                         itens_existentes_map[novo_item_obj['nome'].lower()]['quantidade'] += novo_item_obj['quantidade']
                     else:
-                        # Novo item, adiciona à lista
+
                         itens_existentes.append(novo_item_obj)
                 
                 pedidos_em_aberto_collection.update_one(
@@ -365,25 +354,21 @@ class ChatService:
             for pedido in usuario_pedidos:
                 data_obj = pedido.get('data', datetime.utcnow()) 
                 
-                # Garante que data_obj é um objeto datetime aware (com timezone)
                 if isinstance(data_obj, datetime) and data_obj.tzinfo is None:
-                    # Se for naive (sem timezone), assume que é UTC (como é salvo)
+
                     data_obj = pytz.utc.localize(data_obj)
                 
-                # Converte para o fuso horário de São Paulo
                 data_local = data_obj.astimezone(self.timezone_sp)
                 
-                # Formata a data e hora em português
                 data_formatada = format_datetime(data_local, format='short', locale='pt_BR')
                 
-                # --- MUDANÇA AQUI: EXTRAIR NOME E QUANTIDADE DOS ITENS ---
                 itens_para_exibir = []
-                # Garante que 'itens' é uma lista e contém dicionários antes de iterar
+
                 if isinstance(pedido.get('itens'), list):
                     for item in pedido['itens']:
                         if isinstance(item, dict) and 'nome' in item and 'quantidade' in item:
                             itens_para_exibir.append(f"{item['quantidade']}x {item['nome']}")
-                        elif isinstance(item, str): # Tratamento para dados antigos/inconsistentes
+                        elif isinstance(item, str):
                             itens_para_exibir.append(item)
                         else:
                             print(f"AVISO: Item de pedido mal formatado no histórico: {item}")
@@ -393,7 +378,6 @@ class ChatService:
                     itens_para_exibir.append("Itens indisponíveis")
 
                 itens_str = ", ".join(itens_para_exibir)
-                # --- FIM DA MUDANÇA ---
                 
                 status_str = pedido.get('status', 'desconhecido')
                 resposta += f"📅 {data_formatada}: {itens_str} (Status: {status_str})\n"
